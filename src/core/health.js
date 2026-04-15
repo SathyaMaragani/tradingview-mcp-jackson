@@ -197,6 +197,23 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* ignore */ }
   }
 
+  let storeApp = null;
+  if (!tvPath && platform === 'win32') {
+    try {
+      const script = '$p = Get-AppxPackage -Name *TradingView*; if ($p) { $p.InstallLocation + "|" + $p.PackageFamilyName }';
+      const encoded = Buffer.from(script, 'utf16le').toString('base64');
+      const line = execSync(`powershell.exe -NoProfile -EncodedCommand ${encoded}`, { timeout: 5000 }).toString().trim().split(/\r?\n/)[0];
+      if (line && line.includes('|')) {
+        const [installDir, pfn] = line.split('|');
+        const candidate = `${installDir}\\TradingView.exe`;
+        if (existsSync(candidate)) {
+          tvPath = candidate;
+          storeApp = { pfn, appId: 'TradingView.Desktop' };
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   if (!tvPath && platform === 'darwin') {
     try {
       const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
@@ -219,8 +236,17 @@ export async function launch({ port, kill_existing } = {}) {
     } catch { /* may not be running */ }
   }
 
-  const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  let child;
+  if (storeApp) {
+    const inner = `Invoke-CommandInDesktopPackage -PackageFamilyName '${storeApp.pfn}' -AppId '${storeApp.appId}' -Command '${tvPath}' -Args '--remote-debugging-port=${cdpPort}'`;
+    const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile','-Command',"${inner}")`;
+    const encoded = Buffer.from(outer, 'utf16le').toString('base64');
+    child = spawn('powershell.exe', ['-NoProfile', '-EncodedCommand', encoded], { detached: true, stdio: 'ignore' });
+    child.unref();
+  } else {
+    child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+  }
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));

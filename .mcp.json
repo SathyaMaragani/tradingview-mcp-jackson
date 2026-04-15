@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "node",
+      "args": ["D:/Mytrading/Algo/tv-mcp/src/server.js"]
+    }
+  }
+}
